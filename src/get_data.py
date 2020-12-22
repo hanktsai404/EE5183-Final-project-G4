@@ -4,7 +4,7 @@ Created on 16th Dec. 2020
 
 @author: hanktsai404
 
-This module is intended to get the daily stock price data of Taiwan from yahoo finance. The data persist from 2010-01-01 to today.
+This module is intended to get the daily stock price data of Taiwanese firms and exchange rate data from yahoo finance.
 '''
 from datetime import datetime, date, timedelta
 from io import StringIO
@@ -267,6 +267,7 @@ class exchange_rate():
         return rates_df
 
 if __name__ == "__main__":
+    '''Testing section'''
     mv_table = pd.read_csv("../data/Market_Value_Table.csv")
     firm_list = mv_table["Stock_id"].to_list()[:1]
     crawler = crawler()
