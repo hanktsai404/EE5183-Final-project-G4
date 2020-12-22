@@ -6,14 +6,29 @@ Created on 16th Dec. 2020
 
 This module is intended to get the daily stock price data of Taiwan from yahoo finance. The data persist from 2010-01-01 to today.
 '''
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from io import StringIO
-import requests
 import pandas as pd
-import yfinance as yf
-from bs4 import BeautifulSoup
 import os
+import requests
+from bs4 import BeautifulSoup
+import yfinance as yf
+import pandas_datareader.data as web
 
+def years_ago(year: int) -> datetime:
+    now = datetime.now()
+    this_year = now.year
+    result_date = date.today()
+    if not (now.month > 2 or (now.month == 2 and now.date == 29)):
+        this_year = this_year - 1
+    for i in range(year):
+        if this_year % 4 == 0:
+            result_date = result_date - timedelta(days = 366)
+        else:
+            result_date = result_date - timedelta(days = 365)
+        this_year = this_year - 1
+    return result_date
+    
 class crawler():
     '''Crawling stock price data from yahoo finance'''
 
@@ -198,8 +213,6 @@ class crawler():
         # print(price_data.iloc[:50,])
         return price_data
 
-
-
 class market_value_table():
     '''
     Member variables:
@@ -232,15 +245,30 @@ class market_value_table():
     
     def write_mv_table_to_csv(self):
         now_path = os.getcwd()
-        target_csv = open(now_path + "\\" +"Market_Value_Table.csv", "w", newline="", encoding="UTF-8")
+        target_csv = open(now_path + "\\" +"../data/Market_Value_Table.csv", "w", newline="", encoding="UTF-8")
         self.mv_table.to_csv(target_csv)
         target_csv.close()
 
-
+class exchange_rate():
+    '''Crawling historical data of exchange rate USD/Target currency from yahoo finance'''
+    
+    def __init__(self):
+        pass
+    
+    def crawl_exchange_rate(self, target: str) -> pd.DataFrame:
+        today = date.today()
+        rates_df = web.DataReader(target + "=x", "yahoo", start = years_ago(10), end = today)
+        rates_df.reset_index(inplace = True)
+        rates_df["Date"] = [int(d.strftime("%Y%m%d")) for d in  rates_df["Date"]]
+        rates_df =  rates_df.sort_values(["Date"], ascending = False)
+        rates_df["Date"] = [datetime.strptime(str(d), "%Y%m%d") for d in  rates_df["Date"]]
+        rates_df =  rates_df.sort_index()
+        print(rates_df)
+        return rates_df
 
 if __name__ == "__main__":
-    mv_table = pd.read_csv("Market_Value_Table.csv")
-    firm_list = mv_table["Stock_id"].to_list()[:5]
+    mv_table = pd.read_csv("../data/Market_Value_Table.csv")
+    firm_list = mv_table["Stock_id"].to_list()[:1]
     crawler = crawler()
     datas_list = []
     for firm_id in firm_list:
@@ -249,3 +277,6 @@ if __name__ == "__main__":
         price_df = crawler.compute_price_indicators(price_df)
         print(price_df.iloc[:50,])
         datas_list.append(price_df)
+    ex_rate = exchange_rate()
+    TWD_rates = ex_rate.crawl_exchange_rate("TWD")
+    CNY_rates = ex_rate.crawl_exchange_rate("CNY")
