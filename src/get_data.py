@@ -9,25 +9,13 @@ This module is intended to get the daily stock price data of Taiwanese firms and
 from datetime import datetime, date, timedelta
 from io import StringIO
 import pandas as pd
+import numpy as np
 import os
 import requests
 from bs4 import BeautifulSoup
 import yfinance as yf
 import pandas_datareader.data as web
 
-def years_ago(year: int) -> datetime:
-    now = datetime.now()
-    this_year = now.year
-    result_date = date.today()
-    if not (now.month > 2 or (now.month == 2 and now.date == 29)):
-        this_year = this_year - 1
-    for i in range(year):
-        if this_year % 4 == 0:
-            result_date = result_date - timedelta(days = 366)
-        else:
-            result_date = result_date - timedelta(days = 365)
-        this_year = this_year - 1
-    return result_date
     
 class crawler():
     '''Crawling stock price data from yahoo finance'''
@@ -38,14 +26,13 @@ class crawler():
     def crawl_firm(self, str_index: str) -> pd.DataFrame:
         '''Crawl daily historical stock price with the given stock index'''
         stock = yf.Ticker(str(str_index)+".TW")
-        price_data = stock.history("10y")
+        price_data = stock.history(start = "2011-01-01", end = "2020-10-30")
         price_data = price_data.drop(columns = ["Dividends", "Stock Splits"])
         price_data.reset_index(inplace = True)
         price_data["Date"] = [int(d.strftime("%Y%m%d")) for d in price_data["Date"]]
         price_data = price_data.sort_values(["Date"], ascending = False)
         price_data["Date"] = [datetime.strptime(str(d), "%Y%m%d") for d in price_data["Date"]]
         price_data = price_data.sort_index()
-        print(price_data)
         return price_data
     
     def compute_WMA_and_momentum(self, price_data: pd.DataFrame) -> pd.DataFrame:
@@ -257,27 +244,109 @@ class exchange_rate():
     
     def crawl_exchange_rate(self, target: str) -> pd.DataFrame:
         today = date.today()
-        rates_df = web.DataReader(target + "=x", "yahoo", start = years_ago(10), end = today)
+        rates_df = web.DataReader(target + "=x", "yahoo", start = "2011-01-01", end = "2020-11-01")
         rates_df.reset_index(inplace = True)
         rates_df["Date"] = [int(d.strftime("%Y%m%d")) for d in  rates_df["Date"]]
         rates_df =  rates_df.sort_values(["Date"], ascending = False)
         rates_df["Date"] = [datetime.strptime(str(d), "%Y%m%d") for d in  rates_df["Date"]]
-        rates_df =  rates_df.sort_index()
-        print(rates_df)
+        rates_df = rates_df.sort_index()
+        rates_df = rates_df[["Date", "Close"]]
+        rates_df["Close"] = pd.to_numeric(rates_df["Close"])
+        rates_df.to_csv("TWDRate.csv")
         return rates_df
+
+class macro():
+    def __init__(self):
+        '''Read macro indicators'''
+        self.TBill_rate = pd.read_csv("../data/3m_TBillRate.csv", ).set_index("Date")
+        self.Inflation = pd.read_csv("../data/AnnualizeInflation.csv").set_index("Date")
+        self.CCI = pd.read_csv("../data/CCI.csv").set_index("Date")
+        self.ChinaCPI = pd.read_csv("../data/ChinaCPI.csv").set_index("Date")
+        
+        self.ChinaM2 = pd.read_csv("../data/ChinaM2.csv").set_index("Date")
+        self.ChinaM2["Value"] = self.ChinaM2["Value"].str.replace(",", "")
+        self.ChinaM2["Value"] = pd.to_numeric(self.ChinaM2["Value"])
+        self.ChinaPPI = pd.read_csv("../data/ChinaPPI.csv").set_index("Date")
+        self.LeadingEconIdx = pd.read_csv("../data/LeadingEconomicIndicator.csv").set_index("Date")
+        self.MiseryIdx = pd.read_csv("../data/MiseryIndex.csv").set_index("Date")
+
+        self.TaiwanM2 = pd.read_csv("../data/TaiwanM2.csv").set_index("Date")
+        self.TaiwanM2["Value"] = self.TaiwanM2["Value"].str.replace(",", "")
+        self.TaiwanM2["Value"] = pd.to_numeric(self.TaiwanM2["Value"])
+        self.USCPI = pd.read_csv("../data/USCPI.csv").set_index("Date")
+        self.FEDRate = pd.read_csv("../data/USFEDFundRate.csv").set_index("Date")
+        self.USM2 = pd.read_csv("../data/USM2.csv").set_index("Date")
+        self.USM2["Value"] = self.USM2["Value"].str.replace(",", "")
+        self.USM2["Value"] = pd.to_numeric(self.USM2["Value"])
+        self.USPPI = pd.read_csv("../data/USPPI.csv").set_index("Date")
+
+        self.ex_rate = exchange_rate()
+        self.TWD_rate = self.ex_rate.crawl_exchange_rate("TWD")
+        self.CNY_rate = self.ex_rate.crawl_exchange_rate("CNY")
+    
+    def add_a_macro_feature(self, price_df: pd.DataFrame, feature_df: pd.DataFrame, name: str, is_ex_rate = False) -> pd.DataFrame:
+        '''Make a new column for the feature in price_df. Match the date.'''
+        years = list(pd.DatetimeIndex(price_df["Date"]).year)
+        month = list(pd.DatetimeIndex(price_df["Date"]).month)
+        for i in range(len(month)):
+            if len(str(month[i])) == 1:
+                month[i] = "0" + str(month[i])
+            else:
+                month[i] = str(month[i])
+        if not is_ex_rate:
+            dates = [(str(y) + "/" + m) for y, m in zip(years, month)]
+            feature = []
+            for date in dates:
+                feature.append(feature_df.loc[date]["Value"].item())
+            price_df[name] = feature
+            return price_df
+        else:
+            days = list(pd.DatetimeIndex(price_df["Date"]).date)
+            feature = []
+            for day in days:
+                try:
+                    feature.append(feature_df[feature_df["Date"] == day.strftime("%Y-%m-%d")]["Close"].item())
+                except ValueError:  # If the exchange market is not open that day, we use the price from yesterday.
+                    feature.append(feature[-1])
+            price_df[name] = feature
+            return price_df
+    
+    def add_macros(self, price_df: pd.DataFrame) -> pd.DataFrame:
+        '''Add macro indicators to price_df'''
+        price_df = self.add_a_macro_feature(price_df, self.TBill_rate, "TBill_rate")
+        price_df = self.add_a_macro_feature(price_df, self.Inflation, "Inflation")
+        price_df = self.add_a_macro_feature(price_df, self.CCI, "CCI")
+        price_df = self.add_a_macro_feature(price_df, self.ChinaCPI, "ChinaCPI")
+        price_df = self.add_a_macro_feature(price_df, self.ChinaM2, "ChinaM2")
+        price_df = self.add_a_macro_feature(price_df, self.ChinaPPI, "ChinaPPI")
+        price_df = self.add_a_macro_feature(price_df, self.LeadingEconIdx, "LeadingEconIdx")
+        price_df = self.add_a_macro_feature(price_df, self.MiseryIdx, "MiseryIdx")
+        price_df = self.add_a_macro_feature(price_df, self.TaiwanM2, "TaiwanM2")
+        price_df = self.add_a_macro_feature(price_df, self.USCPI, "USCPI")
+        price_df = self.add_a_macro_feature(price_df, self.USM2, "USM2")
+        price_df = self.add_a_macro_feature(price_df, self.USPPI, "USPPI")
+        price_df = self.add_a_macro_feature(price_df, self.FEDRate, "FED_Rate")
+        price_df = self.add_a_macro_feature(price_df, self.TWD_rate, "TWD_Rate", is_ex_rate = True)
+        price_df = self.add_a_macro_feature(price_df, self.CNY_rate, "CNY_Rate", is_ex_rate = True)
+        return price_df
+            
 
 if __name__ == "__main__":
     '''Testing section'''
+    NUM_FIRM = 20 # Adjustable parameters
     mv_table = pd.read_csv("../data/Market_Value_Table.csv")
-    firm_list = mv_table["Stock_id"].to_list()[:1]
+    firm_list = zip(mv_table["Stock_id"].to_list()[:NUM_FIRM], mv_table["Company_name"].to_list()[:NUM_FIRM])
     crawler = crawler()
-    datas_list = []
-    for firm_id in firm_list:
+    macro = macro()
+    for (firm_id, firm_name) in firm_list:
         print(firm_id)
         price_df = crawler.crawl_firm(firm_id)
         price_df = crawler.compute_price_indicators(price_df)
-        print(price_df.iloc[:50,])
-        datas_list.append(price_df)
-    ex_rate = exchange_rate()
-    TWD_rates = ex_rate.crawl_exchange_rate("TWD")
-    CNY_rates = ex_rate.crawl_exchange_rate("CNY")
+        price_df = macro.add_macros(price_df)
+        price_df = price_df.set_index("Date")
+        price_df = price_df.dropna()
+        price_df.to_csv("../firms/" + str(firm_id) + firm_name + ".csv")
+        
+    # ex_rate = exchange_rate()
+    # TWD_rates = ex_rate.crawl_exchange_rate("TWD")
+    # CNY_rates = ex_rate.crawl_exchange_rate("CNY")
