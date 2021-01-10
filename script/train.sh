@@ -7,7 +7,7 @@ epoch=100
 checkpoint_path="./checkpoint/"
 
 # --- NNStockSolver Args ---
-method="RandomForest_100" # [Algorithm]: Please see main.py for more details
+method="Prophet" # [Algorithm]: Please see main.py for more details
 feat_num=24
 time_step=40 # [TimeStep]: How many days as data to predict MA
 moving_average=7 # [MovingAverage]: How many days to average
