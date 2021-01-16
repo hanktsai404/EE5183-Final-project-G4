@@ -1,0 +1,19 @@
+.root {
+  margin: 100px;
+}
+
+.title {
+  margin-top: 100px;
+  font-size: large;
+}
+
+.formControl {
+  width: 200px;
+}
+
+.displayBox {
+  display: flex;
+  justify-content: center;
+  margin: auto;
+  margin-top: 40px;
+}
